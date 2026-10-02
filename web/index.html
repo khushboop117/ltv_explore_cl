@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Subscriber LTV Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="eyebrow">
+          Subscriber economics · 160,000 subscriptions · Jul 2023 – Jun 2026
+        </div>
+        <h1>Lifetime value by acquisition source</h1>
+        <p>
+          Expected revenue per new subscriber, by where they came from. Pick a horizon, narrow the
+          cohorts, and enter what you pay per acquisition to see which sources earn their spend.
+        </p>
+      </header>
+
+      <section class="panel controls" aria-label="Controls">
+        <div class="ctl">
+          <span class="lab">Compare by</span>
+          <div class="seg" id="groupBy" role="group">
+            <button data-v="channel" aria-pressed="true">Channel</button>
+            <button data-v="source" aria-pressed="false">Channel + campaign</button>
+            <button data-v="plan" aria-pressed="false">Plan</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <label for="hz">Time horizon</label>
+          <div class="hz">
+            <output id="hzOut">24</output><span class="note">months after signup</span>
+          </div>
+          <input type="range" id="hz" min="1" max="60" value="24" />
+          <div class="presets" id="hzPre">
+            <button data-v="3">3</button><button data-v="6">6</button><button data-v="12">12</button
+            ><button data-v="24">24</button><button data-v="36">36</button
+            ><button data-v="60">60</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <span class="lab">Plan</span>
+          <div class="seg" id="plan" role="group">
+            <button data-v="all" aria-pressed="true">Both</button>
+            <button data-v="monthly" aria-pressed="false">Monthly</button>
+            <button data-v="annual" aria-pressed="false">Annual</button>
+          </div>
+          <small>“Both” weights each source by its own plan mix.</small>
+        </div>
+        <div class="ctl">
+          <span class="lab">Signup cohorts</span>
+          <div style="display: flex; gap: 6px; align-items: center">
+            <select id="c0" aria-label="First cohort month"></select
+            ><span class="note">to</span
+            ><select id="c1" aria-label="Last cohort month"></select>
+          </div>
+          <small>Curves are re-fit to the cohorts you pick.</small>
+        </div>
+        <div class="ctl" style="grid-column: span 2; min-width: 0">
+          <span class="lab">Channels included</span>
+          <div class="chips" id="chans"></div>
+        </div>
+        <div class="ctl">
+          <span class="lab">Beyond observed data</span>
+          <div class="seg" id="tail" role="group">
+            <button data-v="model" aria-pressed="true">Model the tail</button>
+            <button data-v="none" aria-pressed="false">Observed only</button>
+          </div>
+          <small>“Observed only” is a floor: no revenue past what the data has seen.</small>
+        </div>
+        <div class="ctl">
+          <label for="disc">Annual discount rate</label>
+          <input type="number" id="disc" min="0" max="50" step="1" value="0" />
+          <small>% per year applied to future payments.</small>
+        </div>
+        <div class="ctl">
+          <label for="margin">Revenue kept</label>
+          <input type="number" id="margin" min="1" max="100" step="1" value="100" />
+          <small>% of price after fees and costs (gross margin).</small>
+        </div>
+        <div class="ctl">
+          <label for="target">Target LTV : CAC</label>
+          <input type="number" id="target" min="0.5" max="10" step="0.5" value="3" />
+          <small>Sets the “max CPA” column.</small>
+        </div>
+      </section>
+
+      <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+      <section class="grid2">
+        <div class="panel">
+          <div class="chart-h">
+            <h2 id="barT">LTV at 24 months</h2>
+            <p>
+              Per new subscriber. Solid part is already observed in the data; the lighter part is
+              the modeled tail.
+            </p>
+          </div>
+          <div class="cbox">
+            <canvas id="barC" role="img" aria-label="Bar chart of lifetime value by group"></canvas>
+          </div>
+          <div class="legend" id="barL"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-h">
+            <h2>How value accumulates</h2>
+            <p>
+              Cumulative revenue per subscriber by month since signup. Dashed where the curve is
+              modeled; the vertical line marks your horizon.
+            </p>
+          </div>
+          <div class="cbox">
+            <canvas
+              id="cumC"
+              role="img"
+              aria-label="Line chart of cumulative LTV by month"
+            ></canvas>
+          </div>
+          <div class="legend" id="cumL"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-h">
+            <h2>Still paying</h2>
+            <p>
+              Share of a signup cohort with paid access at each month. Annual plans step down once a
+              year at renewal.
+            </p>
+          </div>
+          <div class="cbox">
+            <canvas id="retC" role="img" aria-label="Line chart of retention by month"></canvas>
+          </div>
+          <div class="legend" id="retL"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-h">
+            <h2 id="cohT">First-renewal rate by signup quarter</h2>
+            <p id="cohP">
+              Share of monthly subscribers who paid a second time. An early read on cohort quality,
+              available ~2 months after signup.
+            </p>
+          </div>
+          <div class="cbox">
+            <canvas
+              id="cohC"
+              role="img"
+              aria-label="Line chart of first renewal rate by cohort quarter"
+            ></canvas>
+          </div>
+          <div class="legend" id="cohL"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="chart-h">
+          <h2>Source comparison</h2>
+          <p>
+            Enter a cost per acquisition (CAC) for any source to get LTV:CAC and payback. CAC isn’t
+            in the dataset; entries stay in this browser only.
+          </p>
+        </div>
+        <div class="tbl"><table id="tbl"></table></div>
+        <p class="note" id="tblNote"></p>
+      </section>
+
+      <section class="panel method" id="method">
+        <div>
+          <h2>How this is calculated</h2>
+          <p>
+            LTV here is expected cash collected per new subscriber within the horizon: price ×
+            probability of making each payment, summed over the payments that fall inside the
+            window.
+          </p>
+          <h3>1. Turn each subscription into a payment count</h3>
+          <p>
+            Each subscription is converted into the number of charges it paid. The end dates in the
+            file follow exact rules, which the conversion reproduces for every one of the 57,739
+            ended subscriptions:
+          </p>
+          <ul>
+            <li>
+              A billing period is 365 days (annual) or 365.25 ÷ 12 ≈ 30.44 days (monthly). Renewal
+              <i>k</i> is charged on day round(<i>k</i> × period).
+            </li>
+            <li>
+              Voluntary cancels end access on the next renewal date, so the last period is paid in
+              full.
+            </li>
+            <li>
+              Payment failures end access exactly 28 days after the failed renewal (the retry
+              window). The failed charge is not revenue.
+            </li>
+          </ul>
+          <h3>2. Estimate the chance of each renewal</h3>
+          <p>
+            For every renewal (2nd payment, 3rd payment, …) the tool counts how many subscribers
+            reached it and how many churned there. That gives an observed survival curve, built
+            Kaplan–Meier style so younger cohorts still contribute to early renewals.
+          </p>
+          <p>
+            A renewal’s outcome is only counted once renewal date + 28 days has passed by 30 Jun
+            2026. Otherwise a failing card still in retries would look like a payer, and voluntary
+            churn (visible on the renewal date) would be counted before payment failures (visible 28
+            days later). Pending cancels are treated the same way, so nothing about the future leaks
+            in.
+          </p>
+          <h3>3. Extend the curve past the data</h3>
+          <p>
+            Data runs out at 36 monthly payments and 3 annual payments. Past the point where fewer
+            than 100 subscribers are still at risk, the curve continues with a fitted model.
+            Voluntary churn and payment failure are each modeled as a shifted‑beta‑geometric process
+            (a standard subscription model where churn falls over time as less loyal subscribers
+            leave first), and combined as competing risks.
+          </p>
+        </div>
+        <div>
+          <h3>Does the tail model hold up?</h3>
+          <p>
+            Backtest on monthly plans: fit only on the first 12 renewals, then predict the next two
+            years and compare with what actually happened.
+          </p>
+          <div class="tbl">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Actual retention at month 30</th>
+                  <th>Predicted</th>
+                  <th>36-mo LTV error</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>All sources</td>
+                  <td>36.6%</td>
+                  <td>37.7%</td>
+                  <td>+0.8%</td>
+                </tr>
+                <tr>
+                  <td>Direct</td>
+                  <td>40.3%</td>
+                  <td>41.3%</td>
+                  <td>+0.5%</td>
+                </tr>
+                <tr>
+                  <td>Email</td>
+                  <td>52.3%</td>
+                  <td>53.2%</td>
+                  <td>+0.2%</td>
+                </tr>
+                <tr>
+                  <td>Organic search</td>
+                  <td>39.0%</td>
+                  <td>39.6%</td>
+                  <td>+0.4%</td>
+                </tr>
+                <tr>
+                  <td>Organic social</td>
+                  <td>25.2%</td>
+                  <td>26.7%</td>
+                  <td>+1.7%</td>
+                </tr>
+                <tr>
+                  <td>Paid social · Prospecting</td>
+                  <td>23.5%</td>
+                  <td>24.7%</td>
+                  <td>+1.5%</td>
+                </tr>
+                <tr>
+                  <td>Paid social · Lookalike</td>
+                  <td>38.1%</td>
+                  <td>40.9%</td>
+                  <td>+2.1%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Simpler options missed in opposite directions. One beta‑geometric curve for all churn
+            predicted 41.2% (too optimistic, because payment failures don’t fade the way voluntary
+            churn does). A flat payment‑failure rate predicted 33.6% (too pessimistic). Modeling
+            both separately lands closest.
+          </p>
+          <h3>Assumptions</h3>
+          <ul>
+            <li>
+              Prices are fixed at $15/month and $150/year. No refunds, taxes, promotions or plan
+              switches.
+            </li>
+            <li>
+              A cohort window is pooled into one curve. Early renewal rates have been stable since
+              mid‑2023, so pooling is reasonable, but narrow the window if you suspect a change.
+            </li>
+            <li>
+              Annual plans have only two observed renewals, so their tail past year 3 rests on the
+              model. Read 48–60 month annual LTVs as estimates.
+            </li>
+            <li>
+              Segments with fewer than 200 at‑risk renewals borrow the model shape from the full
+              selection and are flagged “thin”.
+            </li>
+            <li>
+              LTV is revenue, not profit, unless you lower “Revenue kept”. Acquisition cost is never
+              subtracted inside LTV.
+            </li>
+          </ul>
+          <h3>Using this for paid marketing</h3>
+          <ul>
+            <li>
+              Set bids per source from <b>max CPA = LTV ÷ target ratio</b> at the payback horizon
+              finance accepts, instead of one blended CPA.
+            </li>
+            <li>
+              Watch the first‑renewal chart weekly. It moves within two months of a campaign change,
+              long before LTV can.
+            </li>
+            <li>
+              Send value back to ad platforms: post a predicted‑LTV conversion value by plan and
+              source, so bidding optimizes for subscribers who stay.
+            </li>
+            <li>
+              Push annual plans where they’re weak. An annual signup is worth more than a monthly
+              one from the same source.
+            </li>
+            <li>
+              About one cancellation in five is a failed payment, not a choice. Better card retries
+              and updater services raise LTV for every channel.
+            </li>
+          </ul>
+        </div>
+      </section>
+    </div>
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

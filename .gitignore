@@ -1,0 +1,16 @@
+# Raw data stays local (see data/README.md). The aggregated web/data.js is committed.
+data/*.csv
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
